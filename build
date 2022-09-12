@@ -1,0 +1,3 @@
+fasm $1.asm -s $1.sym
+fasmlist -a $1.sym $1.lst
+rm $1.sym
