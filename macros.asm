@@ -74,9 +74,7 @@ LASTHEAD = name
 
 MACRO mstring args {
 LOCAL .end
-
 	db  .end-$-1
-	
 	db args
 .end:
 	align 4

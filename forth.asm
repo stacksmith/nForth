@@ -232,6 +232,11 @@ _parse:
 .x:	mov	[PARSE.PTR+4],esi  		;update parse position
 	pop	esi
 	ret
+
+HEAD parse,$+4
+	call	_parse
+	NEXT
+
 ;;; HEAD strlen,$+4 		; (str--len)
 _strlen:
 	mov	edi,ebx
@@ -312,19 +317,15 @@ HEAD space,docol
 	dd	emit
 	dd  	return
 
-HEAD parse,$+4
-	call	_parse
-	NEXT
-	
-HEAD main,docol
+HEAD hello,docol,1
 	dd	litstring
 	db	.strend-$-1,"Hello World",$A
 .strend:
 align 4
 	dd	type
-	dd	sys
+	dd	return
 	
-	
+HEAD main,docol
 .in:	dd	PARSE.RESET
 	dd	ERR.CATCH
 	dd	zbranch,.noerr
@@ -335,8 +336,7 @@ align 4
 
 .noerr:
  	dd	ws
-	dd	parse
-	dd	sys
+	dd	COMPILE.ONE
  	dd	branch, .noerr
 
 
@@ -380,12 +380,13 @@ HEAD _sysp, $+4
 	mov	ebx,edx
 	NEXT
 	
-HEAD sys,docol
+HEAD sys,docol,1
 	dd 	litstring
-	mstring <"DSP",9," RSP",$A>
+	mstring <"DSP",9," RSP",9,"  DIC",$A>
 	dd	type
 	dd	_sysp
-	dd	hexd,space,hexd,cr
+	dd	hexd,space,hexd,space
+	dd	HERE,fetch,hexd,cr
 	dd	hexd,space,hexd,space,hexd,cr
 	dd	return
 
@@ -457,7 +458,43 @@ HEAD ERXIT,$+4
 ; -------------------
 ; Compilation
 ; -------------------
+;; HEAD COMPILE.ONE,$+4
+;; 	test	ebx,ebx
+;; 	jz	.number
+;; .word:	DSTACK
+;; 	pop	ebx		;eptr
+;; 	pop	ebx
+;; 	RSTACK
+;; 	NEXT
 
+;; .number:
+;; 	mov	edi,[HERE+4]
+;; 	mov	eax,lit
+;; 	stosd
+;; 	DSTACK
+;; 	pop	eax	 	;number
+;; 	pop	ebx
+;; 	RSTACK
+;; 	stosd
+;; 	mov	[HERE+4],edi
+;; 	NEXT
+HEAD gettype,$+4  		;entry--type
+	movzx	ebx,word[ebx-8]
+	NEXT
+	
+HEAD COMPILE.ONE,docol
+	dd	parse
+	dd	zbranch,.number
+.word:
+	dd	xdup, gettype
+	dd	zbranch,.proc
+.self:	dd	execute,return
+.proc:	dd      comma
+	dd	return
+.number:	
+	dd 	lit,lit,comma  	;compile <LIT>
+	dd	comma           ;compile <number>
+	dd	return
 ; , - ( x -- ) compile x to the current definition.
 ;    Stores the number on the stack to the memory location currently
 ;    pointed to by dp.
@@ -508,7 +545,7 @@ _popret:
 	xchg	ebp,esp
 	NEXT
 ; dup - ( x -- x x ) add a copy of x to the stack
-HEADN _dup,"dup",$+4
+HEADN xdup,"dup",$+4
 	xchg	ebp,esp
 	push	ebx
 	xchg	ebp,esp
@@ -583,13 +620,13 @@ HEAD dbra,$+4
 
 
 
-; execute - ( xt -- ) call the word at xt !!!! WRONG!@!!!!
+; execute - ( xt -- ) call the word at xt+4
 HEAD execute,$+4
-	mov	edx,ebx
-	xchg	ebp,esp
+	mov	eax,ebx
+	DSTACK
 	pop	ebx
-	xchg	ebp,esp
-	jmp	edx
+	RSTACK
+	jmp	dword[eax]
 
 
 	
@@ -598,6 +635,7 @@ HEADN return,";",$+4
 	NEXT
 
 HEAD a,$+4
+	
 	NEXT
-
+align 4
 TOP:
