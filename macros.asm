@@ -48,25 +48,36 @@ MACRO NEXT {
 	jmp	dword[eax]
 }
 
-
-; 4	Link field
-; 4	Hash field (name hash)
-; 4	Code field
+; -8 2 flags
+; -6 2	Link field
+; -4 4	Hash field (name hash)
+; -0 4	Code field
 ; ...
-LASTHEAD = 0
+LASTHEAD = PARSE.RESET
 IMMEDIATE equ 1	
-	MACRO HEAD name,type, immediate=0 {
-	db immediate
-	dd LASTHEAD
+MACRO HEAD name,type, immediate=0 {
+align 4	
+	dw immediate
+	dw ((name - LASTHEAD) and $FFFF)
 	HASH `name
 name:	dd type
 LASTHEAD = name
 }
-MACRO HEADN name,hashname,type,immediate=0 {
-	db immediate
-	dd LASTHEAD
+MACRO HEADN name,hashname,type,immediate=0 {	
+align 4
+	dw immediate
+	dw ((name - LASTHEAD) and $FFFF)
 	HASH hashname
 name:	dd type
 LASTHEAD = name
 }
 
+MACRO mstring args {
+LOCAL .end
+
+	db  .end-$-1
+	
+	db args
+.end:
+	align 4
+}

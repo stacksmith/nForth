@@ -72,11 +72,21 @@ HEAD PARSE.RESET,$+4
 	mov	[PARSE.PTR+4],edx ;reset parse ptr
 	mov	byte[edx],0
 	NEXT
+
+_prompt:
+	DSTACK
+	push	ebx
+	push	_promptstr
+	RSTACK
+	mov	ebx,4
+	jmp	_type
 	
+_promptstr:	db "OK> "
 _ws:	push	esi
 	mov	esi,[PARSE.PTR+4]
 	jmp	.loop
 .reload:
+	call	_prompt
 	push	ebx
 	xor	ebx,ebx			;stdin
 	mov	ecx,[TIB+4]		;address
@@ -102,8 +112,6 @@ _ws:	push	esi
 HEAD ws,$+4
 	call	_ws
 	NEXT
-	
-	
 ; eax=scan,mulresult
 ; 
 ; ecx=temp,cnt
@@ -181,11 +189,14 @@ _FNV1a: ;from esi
 _search: 			;(hash--0/zr or --entry/nz)
 	mov	eax,[LATEST+4]
 	xchg	eax,ebx				;ebx = entry;  eax = hash
-.loop:	cmp	[ebx-4],eax
+	xor	edx,edx				;edx = skipback size
+.loop:	sub	ebx,edx
+	cmp	[ebx-4],eax
 	je	.done				;found
-	mov	ebx,[ebx-8]			;link
-	test	ebx,ebx
+	movzx	edx,word[ebx-6]			;link (16-bit amount to skip back);
+	test	edx,edx				;link of 0 means end
 	jne	.loop
+	xor	ebx,ebx
 .done:	test	ebx,ebx				;0/zr = fail
 	ret
 
@@ -309,7 +320,7 @@ HEAD main,docol
 	dd	litstring
 	db	.strend-$-1,"Hello World",$A
 .strend:
-;;; align 4
+align 4
 	dd	type
 	dd	sys
 	
@@ -357,12 +368,7 @@ HEAD _sysp, $+4
 	push	ebx		;1,2,3,3
 	push	dword[esp+8]	;1,2,3,1,3
 	push	dword[esp+8]	;1,2,3,1,2,3
-
-	push	ebx
-	push 	.msg
 	RSTACK
-	mov	ebx,.msgx-.msg
-	call	_type
 
 ;;; Now, push (--rsp,dsp)
 	lea	eax,[esp-8]	;RSP
@@ -373,14 +379,10 @@ HEAD _sysp, $+4
 	RSTACK
 	mov	ebx,edx
 	NEXT
-.msg:	db "DSP	 RSP",$A
-.msgx:
 	
 HEAD sys,docol
 	dd 	litstring
-	db	@f-$-1,"DSP",9," RSP",$A
-@@:
-;;; 	align 4
+	mstring <"DSP",9," RSP",$A>
 	dd	type
 	dd	_sysp
 	dd	hexd,space,hexd,cr
@@ -484,9 +486,8 @@ HEAD litstring,$+4
 	push	esi		;
 	RSTACK
 	movzx	ebx,al		;TOS = cnt
-;;; 	lea	esi,[ebx+3]	;bump IP, aligning
-;;; 	and	esi,$FFFFFFFC ;
-	add	esi,ebx
+ 	lea	esi,[esi+ebx+3]	;bump IP, aligning
+ 	and	esi,$FFFFFFFC ;
 	NEXT
 
 ; rot - ( x y z -- y z x )
