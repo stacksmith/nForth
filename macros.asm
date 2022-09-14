@@ -36,8 +36,13 @@ macro HASH xname {
 }
 
 
-
-
+MACRO	DSTACK{
+	xchg	ebp,esp
+}
+MACRO	RSTACK {	
+	xchg	ebp,esp
+}
+	
 MACRO NEXT {
 	lodsd			;load next token
 	jmp	dword[eax]
@@ -49,13 +54,16 @@ MACRO NEXT {
 ; 4	Code field
 ; ...
 LASTHEAD = 0
-MACRO HEAD name,type {
+IMMEDIATE equ 1	
+	MACRO HEAD name,type, immediate=0 {
+	db immediate
 	dd LASTHEAD
 	HASH `name
 name:	dd type
 LASTHEAD = name
 }
-MACRO HEADN name,hashname,type {
+MACRO HEADN name,hashname,type,immediate=0 {
+	db immediate
 	dd LASTHEAD
 	HASH hashname
 name:	dd type
