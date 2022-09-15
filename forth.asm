@@ -182,7 +182,12 @@ _FNV1a: ;from esi
 	call	_is_ws
 	jne	.loop
 	ret
-	
+
+HEADN XHASH,"HASH",$+4
+	push	esi
+	call	_FNV1a
+	pop	esi
+	NEXT
 ;;;----------------------------------------------------------------------------
 ;;; _search for a hash, from LATEST to first.  Return 0 or entry.
 ;;; 
@@ -335,8 +340,7 @@ HEAD main,docol
 	dd	branch, .in
 
 .noerr:
- 	dd	ws
-	dd	COMPILE.ONE
+	dd	INTERPRET
  	dd	branch, .noerr
 
 
@@ -495,7 +499,33 @@ HEAD COMPILE.ONE,docol
 	dd 	lit,lit,comma  	;compile <LIT>
 	dd	comma           ;compile <number>
 	dd	return
-; , - ( x -- ) compile x to the current definition.
+
+
+HEAD COMPILE.UNTIL,$+4	;delim 
+	
+	
+;;; In order to execute
+HEAD CALLSTREAM,$+4
+	push	esi
+	mov	esi,ebx
+	DSTACK
+	pop	ebx
+	RSTACK
+	NEXT
+	
+	
+HEAD INTERPRET,docol
+	dd	HERE,fetch,RUNPTR,xstore	; start of compile
+	dd	ws,COMPILE.ONE
+	dd	lit,return,comma	; terminate with return
+	dd	RUNPTR,fetch,CALLSTREAM
+	dd	RUNPTR,fetch,HERE,xstore ; erase
+	dd	return
+
+
+	
+
+				; , - ( x -- ) compile x to the current definition.
 ;    Stores the number on the stack to the memory location currently
 ;    pointed to by dp.
 HEADN comma,",",$+4
@@ -540,9 +570,9 @@ HEAD rot,$+4
 ; drop - ( x -- ) remove x from the stack.
 HEAD drop,$+4
 _popret:
-	xchg	ebp,esp
+	DSTACK
 	pop	ebx
-	xchg	ebp,esp
+	RSTACK
 	NEXT
 ; dup - ( x -- x x ) add a copy of x to the stack
 HEADN xdup,"dup",$+4
@@ -588,7 +618,7 @@ HEADN fetch,"@",$+4
 	mov	ebx,[ebx]
 	NEXT
 ; ! - ( x addr -- ) store x at addr
-HEADN _store,"!",$+4
+HEADN xstore,"!",$+4
 	xchg	ebp,esp
 	pop	dword[ebx]
 	pop	ebx
@@ -628,7 +658,16 @@ HEAD execute,$+4
 	RSTACK
 	jmp	dword[eax]
 
+HEADN xpush,"push",$+4
+	push	ebx
+	jmp	_popret
 
+HEADN xpop,"pop",$+4
+	DSTACK
+	push	ebx
+	RSTACK
+	pop	ebx
+	NEXT
 	
 HEADN return,";",$+4
 	pop	esi
