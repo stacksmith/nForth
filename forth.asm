@@ -9,7 +9,7 @@ format ELF executable 3
 entry start
 
 segment readable executable writeable
-FINALHEAD = a
+FINALHEAD = CPAREN
 start:
 
  	;-----------------------------------------------------------------------
@@ -32,8 +32,13 @@ start:
 	lea	edx,[esp-1024-4096]	;tib
 	mov	[TIB+4],edx		
 mov	[PARSE.PTR+4],edx 	;current parse ptr ;
-mov	byte[edx],0		;will force reload
+	mov	byte[edx],0		;will force reloa
 
+	DSTACK
+	push 	inmsg
+	mov	ebx,inmsg.1-inmsg
+	RSTACK
+	call	_type
 	;;  	call	_ws
 	;;  	call	_parse	      
 	;; 
@@ -56,6 +61,8 @@ mov	byte[edx],0		;will force reload
 	NEXT			
 hexasc db "0123456789ABCDEF"
 
+inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
+.1:
 ;; in parsing mode: esi=src
 
 _is_ws: cmp	al,' '			;space
@@ -78,10 +85,10 @@ _prompt:
 	push	ebx
 	push	_promptstr
 	RSTACK
-	mov	ebx,4
+	mov	ebx,5
 	jmp	_type
 	
-_promptstr:	db "OK> "
+_promptstr:	db " OK> "
 _ws:	push	esi
 	mov	esi,[PARSE.PTR+4]
 	jmp	.loop
@@ -112,6 +119,18 @@ _ws:	push	esi
 HEAD ws,$+4
 	call	_ws
 	NEXT
+	
+HEAD skipword,$+4
+	push	esi
+	mov	esi,[PARSE.PTR+4]
+@@:	lodsb
+	call	_is_ws
+	jne	@b
+	dec	esi
+	mov	[PARSE.PTR+4],esi
+	pop	esi
+	NEXT
+	
 ; eax=scan,mulresult
 ; 
 ; ecx=temp,cnt
@@ -171,6 +190,9 @@ _number:
 ;;; Hash a string at esi, advancing esi until WS.  Hash overwrites EBX.
 ;;; 
 _FNV1a: ;from esi
+	DSTACK
+	push	ebx
+	RSTACK
 	mov	ebx,FNV_OFFSET_BASIS
 	jmp	.in
 .loop:	inc	esi
@@ -185,6 +207,7 @@ _FNV1a: ;from esi
 
 HEADN XHASH,"HASH",$+4
 	push	esi
+	mov	esi,[PARSE.PTR+4]
 	call	_FNV1a
 	pop	esi
 	NEXT
@@ -213,9 +236,6 @@ _search: 			;(hash--0/zr or --entry/nz)
 ;; number: -- num,0
 ;; otherwise, num will force an error.
 _parse:
-	DSTACK
-	push   ebx
-	RSTACK
 	push	esi
 	mov	esi,[PARSE.PTR+4]
 	push	esi                             ;keep around in case of search failure
@@ -242,15 +262,15 @@ HEAD parse,$+4
 	call	_parse
 	NEXT
 
-;;; HEAD strlen,$+4 		; (str--len)
-_strlen:
-	mov	edi,ebx
-	mov	ecx,-1
- 	xor	eax,eax
-	repne scasb
- 	neg	ecx
- 	lea	ebx,[ecx-3]		;negation, starting at -1, 0-term
- 	ret
+;; ;;; HEAD strlen,$+4 		; (str--len)
+;; _strlen:
+;; 	mov	edi,ebx
+;; 	mov	ecx,-1
+;;  	xor	eax,eax
+;; 	repne scasb
+;;  	neg	ecx
+;;  	lea	ebx,[ecx-3]		;negation, starting at -1, 0-term
+;;  	ret
 ;;; HEAD type,$+4	       ;(c-addr,cnt--)
 _type: 
 	DSTACK
@@ -331,11 +351,13 @@ align 4
 	dd	return
 	
 HEAD main,docol
+
 .in:	dd	PARSE.RESET
 	dd	ERR.CATCH
 	dd	zbranch,.noerr
 
-.err:	dd	sys
+.err:	dd	RUNPTR,fetch,HERE,xstore ;abandon
+	dd	sys
 	dd	lit,$DEADFEED,hexd,cr
 	dd	branch, .in
 
@@ -384,15 +406,38 @@ HEAD _sysp, $+4
 	mov	ebx,edx
 	NEXT
 	
-HEAD sys,docol,1
+HEAD sys,docol
 	dd 	litstring
-	mstring <"DSP",9," RSP",9,"  DIC",$A>
+	mstring <"DSP",9," RSP",9,"  DIC",9,"   SRC",$A>
 	dd	type
 	dd	_sysp
 	dd	hexd,space,hexd,space
-	dd	HERE,fetch,hexd,cr
+	dd	HERE,fetch,hexd,space
+	dd	PARSE.PTR,fetch,hexd,cr
 	dd	hexd,space,hexd,space,hexd,cr
 	dd	return
+
+HEAD decibranz,$+4
+	dec	dword[esp]	;decrement counter
+	jz	.done
+.continue:
+	mov	esi,[esi]	;go there 
+	NEXT
+.done:
+	add	esp,4		;drop 0 count
+	add	esi,4		;skip loop target
+	NEXT
+;;; --------------------------------------------------------------------
+;;; CONTROL STRUCTURES
+;;; compile: <push>|... <timesp><loopstart>
+HEADN xtimes,"times",docol,1 	;(n--   n times (...)
+	dd	lit,xpush,comma		;compile <push>.  During compile,
+	dd	HERE,fetch,xpush 	;save target address on RSP
+	dd	ws,COMPILE.ONE		;compile expression
+	dd	lit,decibranz,comma	;complile <decibranz>
+	dd	xpop,comma		;compile target
+	dd	return
+	
 
 	
 HEAD emit,$+4
@@ -401,7 +446,7 @@ HEAD emit,$+4
 	mov	eax,4
 	mov	ebx,1		;stdout
 	mov	ecx,esp		;char address
-	mov	edx,ebx		;length 11
+	mov	edx,ebx		;length 1
 	int	0x80
 	pop	ebx
 	popa
@@ -410,16 +455,16 @@ HEAD emit,$+4
 
 	
 	
-HEAD hexd,$+4
+HEADN hexd,".",$+4
 	mov	ecx,8
 hexloop:
 	rol	ebx,4
 	pusha
 	mov	eax,4
-	and	ebx,$0000000F
-	lea	ecx,[hexasc+ebx]	;address of character
-	mov	ebx,1		;stdout
-	mov	edx,ebx		;length 1
+	and	ebx,$0000000F		;nybble
+	lea	ecx,[hexasc+ebx] 	;address of character
+	mov	ebx,1			;stdout
+	mov	edx,ebx			;length 1
 	int	0x80
 	popa
 	loop	hexloop
@@ -462,15 +507,6 @@ HEAD ERXIT,$+4
 ; -------------------
 ; Compilation
 ; -------------------
-;; HEAD COMPILE.ONE,$+4
-;; 	test	ebx,ebx
-;; 	jz	.number
-;; .word:	DSTACK
-;; 	pop	ebx		;eptr
-;; 	pop	ebx
-;; 	RSTACK
-;; 	NEXT
-
 ;; .number:
 ;; 	mov	edi,[HERE+4]
 ;; 	mov	eax,lit
@@ -487,22 +523,54 @@ HEAD gettype,$+4  		;entry--type
 	NEXT
 	
 HEAD COMPILE.ONE,docol
-	dd	parse
+	dd	parse		;don't forget to WS prior to this
 	dd	zbranch,.number
 .word:
 	dd	xdup, gettype
 	dd	zbranch,.proc
+;;; Immediate word; execute now
 .self:	dd	execute,return
-.proc:	dd      comma
-	dd	return
+;;; If a procedure, simply compile its token
+.proc:	dd      comma,return
+;;; Number? Compile <lit><number>
 .number:	
 	dd 	lit,lit,comma  	;compile <LIT>
 	dd	comma           ;compile <number>
 	dd	return
 
 
-HEAD COMPILE.UNTIL,$+4	;delim 
-	
+HEAD COMPILE.UNTIL,docol	;delim
+	dd	branch,.in
+.ne:	dd	COMPILE.ONE	 ;todo: fix redundant hashing
+.in:	dd	ws
+	dd	xdup,XHASH,equal ;is current hash = delim?
+	dd	zbranch,.ne
+	dd	drop,parse,drop,drop	;delimiter skipped
+	dd	return
+
+HEADN OPAREN,"(",docol,1       	;immediate!
+	dd	lit,$2C0C9A84,COMPILE.UNTIL,return
+
+HEADN colon,":",docol,1
+	dd	HERE,fetch, LATEST,fetch, minus, lit, 8, plus
+	dd	lit, 16, shiftlt,comma
+	dd	ws,XHASH,comma
+	dd 	skipword
+	dd	HERE,fetch,LATEST,xstore
+	dd	lit,docol,comma
+ 	dd	ws,COMPILE.ONE	;
+	dd	lit,return,comma
+	dd	HERE,fetch,RUNPTR,xstore
+	dd	return
+;;;   HERE @ LATEST @ - 8 + 16 << ,  \ backlink
+;;;   ws HASH ,                      \ hash from source
+;;;   skipword                       \ do not compile name
+;;;   HERE @ LATEST !                \ we are the LATEST
+;;;   & docol ,                      \ procedure
+;;;   ws COMPILE.ONE                 \ compile body
+;;;   & ; ,                          \ compile <return>
+;;;   HERE @ RUNTPR !                \ do not run definition
+;;;   ;
 	
 ;;; In order to execute
 HEAD CALLSTREAM,$+4
@@ -599,6 +667,22 @@ HEADN plus,"+",$+4
 	xchg	ebp,esp
 	add	ebx,eax
 	NEXT
+HEADN shiftlt,"<<",$+4
+	mov	ecx,ebx
+	DSTACK
+	pop	ebx
+	RSTACK
+	shl	ebx,cl
+	NEXT
+; + - ( x y -- z) calculate z=x-y then return z
+HEADN minus,"-",$+4
+	xchg	ebp,esp
+	pop	eax
+	xchg	ebp,esp
+	sub	eax,ebx
+	xchg	eax,ebx
+	NEXT
+
 ; = - ( x y -- flag ) return true if x=y
 HEADN equal,"=",$+4
 	xchg	ebp,esp
@@ -647,10 +731,7 @@ HEAD dbra,$+4
 	NEXT
 
 
-
-
-
-; execute - ( xt -- ) call the word at xt+4
+; execute - ( xt -- ) call the word's xt
 HEAD execute,$+4
 	mov	eax,ebx
 	DSTACK
@@ -669,12 +750,25 @@ HEADN xpop,"pop",$+4
 	pop	ebx
 	NEXT
 	
+HEAD dumpbyte,docol
+	dd	xdup,fetch,hexb,space,lit,1,plus,return	
+HEAD dump1,docol		;addr
+	dd	xdup,hexd,space,space
+	dd	lit,16,xpush	;16 times
+@@:	dd	dumpbyte
+	dd	decibranz,@b
+	dd	cr,return
+HEAD dump,docol
+	dd	dump1,dump1,dump1,dump1,return
+
 HEADN return,";",$+4
 	pop	esi
 	NEXT
 
-HEAD a,$+4
-	
+
+
+HEADN CPAREN,")",$+4
 	NEXT
+
 align 4
 TOP:
