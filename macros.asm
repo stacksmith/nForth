@@ -61,7 +61,8 @@ align 4
 	dw ((name - LASTHEAD) and $FFFF)
 	HASH `name
 name:	dd type
-LASTHEAD equ name
+LASTHEAD = name
+;;; 	define LASTHEAD name
 }
 MACRO HEADN name,hashname,type,immediate=0 {	
 align 4
@@ -69,7 +70,9 @@ align 4
 	dw ((name - LASTHEAD) and $FFFF)
 	HASH hashname
 name:	dd type
-LASTHEAD equ name
+LASTHEAD = name
+;;; 	define LASTHEAD name
+
 }
 
 MACRO mstring args {

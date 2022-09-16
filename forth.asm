@@ -9,7 +9,7 @@ format ELF executable 3
 entry start
 
 segment readable executable writeable
-FINALHEAD = CBRACE
+
 hCBRACE = $D80C1648	
 start:
 
@@ -770,6 +770,7 @@ HEADN return,";",$+4
 
 HEADN CBRACE,"]",$+4
 	NEXT
-
+	
+FINALHEAD = LASTHEAD
 align 4
 TOP:
