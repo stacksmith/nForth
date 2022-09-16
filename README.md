@@ -35,3 +35,14 @@ Register usage:
 | esi | IP | yes |
 | edi | -- | yes |
 | ebp | stack | yes |
+
+### Header format
+
+| offset | size | Description |
+|-|-|-|
+| 0 | 2 | FLAGS - bit 0 is immediate when set |
+| 2 | 2 | LINK - byte offset to previous head |
+| 4 | 4 | HASH - hash of the name |
+<-------------------------------------- Entry Pointer
+XT
+...
