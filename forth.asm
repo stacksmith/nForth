@@ -9,7 +9,8 @@ format ELF executable 3
 entry start
 
 segment readable executable writeable
-FINALHEAD = CPAREN
+FINALHEAD = CBRACE
+hCBRACE = $D80C1648	
 start:
 
  	;-----------------------------------------------------------------------
@@ -548,8 +549,8 @@ HEAD COMPILE.UNTIL,docol	;delim
 	dd	drop,parse,drop,drop	;delimiter skipped
 	dd	return
 
-HEADN OPAREN,"(",docol,1       	;immediate!
-	dd	lit,$2C0C9A84,COMPILE.UNTIL,return
+HEADN OBRACE,"[",docol,1       	;immediate!
+	dd	lit,hCBRACE,COMPILE.UNTIL,return
 
 HEADN colon,":",docol,1
 	dd	HERE,fetch, LATEST,fetch, minus, lit, 8, plus
@@ -767,7 +768,7 @@ HEADN return,";",$+4
 
 
 
-HEADN CPAREN,")",$+4
+HEADN CBRACE,"]",$+4
 	NEXT
 
 align 4
