@@ -73,13 +73,42 @@ _is_ws: cmp	al,' '			;space
 	cmp	al,$A			;LF
 	je	.x
 	cmp	al,$D			;CR
-.x:	ret	
-
+.x:	ret
+;;; 
+;;; ----- DO NOT PUT HEADS ABOVE HERE
 HEAD PARSE.RESET,$+4
 	mov	edx,[TIB+4]
 	mov	[PARSE.PTR+4],edx ;reset parse ptr
 	mov	byte[edx],0
 	NEXT
+
+HEAD DSP,$+4
+	DSTACK
+	push	ebx		;value to stack
+	RSTACK
+	mov	ebx,ebp		;load pointer to value
+	NEXT
+HEAD xemit,docol
+	dd 	DSP		;push char, load pointer
+	dd	lit,1		;length
+	dd	xdup		;stdout
+	dd	oswrite,drop
+	dd	return
+
+HEAD oswrite,$+4
+	push	esi
+	
+	mov	eax,4		;WRITE
+	DSTACK
+	pop	edx		;count
+	pop	ecx		;buffer
+	RSTACK
+	int	$80
+	mov	ebx,eax		;result
+
+	pop	esi
+	NEXT
+
 
 _prompt:
 	DSTACK
