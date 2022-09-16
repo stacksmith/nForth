@@ -43,6 +43,6 @@ Register usage:
 | 0 | 2 | FLAGS - bit 0 is immediate when set |
 | 2 | 2 | LINK - byte offset to previous head |
 | 4 | 4 | HASH - hash of the name |
-<-------------------------------------- Entry Pointer
-XT
+|<-------------------------------------- Entry Pointer|||
+| 8 | 4 | XT |
 ...
