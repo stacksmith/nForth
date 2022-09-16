@@ -35,11 +35,6 @@ start:
 mov	[PARSE.PTR+4],edx 	;current parse ptr ;
 	mov	byte[edx],0		;will force reloa
 
-	DSTACK
-	push 	inmsg
-	mov	ebx,inmsg.1-inmsg
-	RSTACK
-	call	_type
 	;;  	call	_ws
 	;;  	call	_parse	      
 	;; 
@@ -60,7 +55,6 @@ mov	[PARSE.PTR+4],edx 	;current parse ptr ;
 	
 	mov	esi,main+4	;start
 	NEXT			
-hexasc db "0123456789ABCDEF"
 
 inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
 .1:
@@ -82,23 +76,11 @@ HEAD PARSE.RESET,$+4
 	mov	byte[edx],0
 	NEXT
 
-HEAD DSP,$+4
-	DSTACK
-	push	ebx		;value to stack
-	RSTACK
-	mov	ebx,ebp		;load pointer to value
-	NEXT
-HEAD xemit,docol
-	dd 	DSP		;push char, load pointer
-	dd	lit,1		;length
-	dd	xdup		;stdout
-	dd	oswrite,drop
-	dd	return
 
+;;; buf,cnt,handle
 HEAD oswrite,$+4
-	push	esi
-	
 	mov	eax,4		;WRITE
+.1:	push	esi
 	DSTACK
 	pop	edx		;count
 	pop	ecx		;buffer
@@ -108,6 +90,30 @@ HEAD oswrite,$+4
 
 	pop	esi
 	NEXT
+;;;  buf,cnt,handle
+HEAD osread,$+4
+	mov	eax,3		;READ
+	jmp	oswrite.1
+
+HEAD emit,docol
+	dd 	XDSP		;push char, load pointer
+	dd	lit,1		;length
+	dd	xdup		;stdout
+	dd	oswrite,drop,drop
+	dd	return
+	
+
+;; HEAD emit,$+4
+;; 	pusha
+;; 	push	ebx		;char is at [esp]
+;; 	mov	eax,4
+;; 	mov	ebx,1		;stdout
+;; 	mov	ecx,esp		;char address
+;; 	mov	edx,ebx		;length 1
+;; 	int	0x80
+;; 	pop	ebx
+;; 	popa
+;; 	jmp	_popret
 
 
 _prompt:
@@ -124,6 +130,7 @@ _ws:	push	esi
 	jmp	.loop
 .reload:
 	call	_prompt
+	
 	push	ebx
 	xor	ebx,ebx			;stdin
 	mov	ecx,[TIB+4]		;address
@@ -183,7 +190,7 @@ _number:
 ;; process an ASCII digit in al, in a given base; result in ebx
 ;;
 .digit:	 push	edi		;
-	mov	edi,hexasc	
+	mov	edi,HEXTAB+4
 	mov	ecx,[ebp]	; base
 	inc	ecx
 	mov	ebx,ecx		; ebx = base+1
@@ -334,7 +341,9 @@ dovar:	xchg	esp,ebp
 	xchg	esp,ebp
 	lea	ebx,[eax+4]
 	NEXT
-
+HEAD HEXTAB,dovar
+	db "0123456789ABCDEF"
+	
 HEAD LATEST,dovar
 	dd	FINALHEAD
 	
@@ -374,14 +383,14 @@ HEAD space,docol
 
 HEAD hello,docol,1
 	dd	litstring
-	db	.strend-$-1,"Hello World",$A
+	db	.strend-$-1,"nForth 0.0.1, Copyright (C) 2022 StackSmith",10
 .strend:
 align 4
 	dd	type
 	dd	return
 	
 HEAD main,docol
-
+	dd	hello
 .in:	dd	PARSE.RESET
 	dd	ERR.CATCH
 	dd	zbranch,.noerr
@@ -419,31 +428,36 @@ HEAD main,docol
 ;; 	dd	exit
 
 ;;; on entry, esp has 2 return addresses.
-HEAD _sysp, $+4
+ANON _sysp, $+4
 	DSTACK
 	push	ebx		;1,2,3,3
 	push	dword[esp+8]	;1,2,3,1,3
 	push	dword[esp+8]	;1,2,3,1,2,3
 	RSTACK
+	NEXT
 
-;;; Now, push (--rsp,dsp)
-	lea	eax,[esp-8]	;RSP
-	mov	edx,ebp		;DSP
+HEADN XDSP,"DSP",$+4
 	DSTACK
-	push	ebx
-	push	eax 		;rsp
+	push	ebx		;value to stack
 	RSTACK
-	mov	ebx,edx
+	mov	ebx,ebp		;load pointer to value
+	NEXT
+
+HEADN XRSP,"RSP",$+4
+	DSTACK
+	push	ebx		;value to stack
+	RSTACK
+	mov	ebx,esp
 	NEXT
 	
 HEAD sys,docol
 	dd 	litstring
 	mstring <"DSP",9," RSP",9,"  DIC",9,"   SRC",$A>
 	dd	type
-	dd	_sysp
-	dd	hexd,space,hexd,space
+	dd	XDSP,hexd,space,XRSP,hexd,space
 	dd	HERE,fetch,hexd,space
 	dd	PARSE.PTR,fetch,hexd,cr
+	dd	_sysp
 	dd	hexd,space,hexd,space,hexd,cr
 	dd	return
 
@@ -467,20 +481,6 @@ HEADN xtimes,"times",docol,1 	;(n--   n times (...)
 	dd	lit,decibranz,comma	;complile <decibranz>
 	dd	xpop,comma		;compile target
 	dd	return
-	
-
-	
-HEAD emit,$+4
-	pusha
-	push	ebx		;char is at [esp]
-	mov	eax,4
-	mov	ebx,1		;stdout
-	mov	ecx,esp		;char address
-	mov	edx,ebx		;length 1
-	int	0x80
-	pop	ebx
-	popa
-	jmp	_popret
 
 
 	
@@ -492,7 +492,7 @@ hexloop:
 	pusha
 	mov	eax,4
 	and	ebx,$0000000F		;nybble
-	lea	ecx,[hexasc+ebx] 	;address of character
+	lea	ecx,[4+HEXTAB+ebx] 	;address of character
 	mov	ebx,1			;stdout
 	mov	edx,ebx			;length 1
 	int	0x80
@@ -697,13 +697,7 @@ HEADN plus,"+",$+4
 	xchg	ebp,esp
 	add	ebx,eax
 	NEXT
-HEADN shiftlt,"<<",$+4
-	mov	ecx,ebx
-	DSTACK
-	pop	ebx
-	RSTACK
-	shl	ebx,cl
-	NEXT
+
 ; + - ( x y -- z) calculate z=x-y then return z
 HEADN minus,"-",$+4
 	xchg	ebp,esp
@@ -713,6 +707,13 @@ HEADN minus,"-",$+4
 	xchg	eax,ebx
 	NEXT
 
+HEADN shiftlt,"<<",$+4
+	mov	ecx,ebx
+	DSTACK
+	pop	ebx
+	RSTACK
+	shl	ebx,cl
+	NEXT
 ; = - ( x y -- flag ) return true if x=y
 HEADN equal,"=",$+4
 	xchg	ebp,esp
@@ -731,13 +732,29 @@ HEADN equal,"=",$+4
 HEADN fetch,"@",$+4
 	mov	ebx,[ebx]
 	NEXT
+HEADN fetchc,"@c",$+4
+	movzx	ebx,byte[ebx]
+	NEXT
+HEADN fetchw,"@w",$+4
+	movzx	ebx,word[ebx]
+	NEXT
 ; ! - ( x addr -- ) store x at addr
 HEADN xstore,"!",$+4
-	xchg	ebp,esp
+	DSTACK
 	pop	dword[ebx]
-	pop	ebx
-	xchg	ebp,esp
+.1:	pop	ebx
+	RSTACK
 	NEXT
+HEADN xstorec,"!c",$+4
+	DSTACK
+	pop	eax
+	mov	[ebx],al
+	jmp	xstore.1
+HEADN xstorew,"!w",$+4
+	DSTACK
+	pop	eax
+	mov	[ebx],ax
+	jmp	xstore.1
 ; -------------------
 ; Flow Control
 ; -------------------
@@ -745,8 +762,7 @@ HEADN xstore,"!",$+4
 HEADN zbranch,"0branch",$+4
 	lodsd			;eax = address to maybe jump to
 	test	ebx,ebx		;zr?
-	jnz	@f
-	xchg	eax,esi		;0, continue from address in eax
+	cmovz	esi,eax
 @@:	jmp	_popret
 
 ; branch - ( -- ) unconditional jump
@@ -794,8 +810,6 @@ HEAD dump,docol
 HEADN return,";",$+4
 	pop	esi
 	NEXT
-
-
 
 HEADN CBRACE,"]",$+4
 	NEXT

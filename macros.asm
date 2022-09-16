@@ -72,9 +72,13 @@ align 4
 name:	dd type
 LASTHEAD = name
 ;;; 	define LASTHEAD name
-
 }
 
+MACRO ANON name,type {
+align 4
+name:	dd type
+}
+	
 MACRO mstring args {
 LOCAL .end
 	db  .end-$-1
