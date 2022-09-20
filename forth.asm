@@ -3,6 +3,8 @@
 ; fasm demonstration of writing simple ELF executable
 
 MEMSIZE = $100000
+LASTHEAD = osexit
+	
 include "macros.asm"
 
 format ELF executable 3
@@ -11,6 +13,10 @@ entry start
 segment readable executable writeable
 
 hCBRACE = $D80C1648
+
+
+inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
+.1:
 
 start:
 
@@ -27,36 +33,20 @@ start:
  	mov	eax,45			;brk
  	int	0x80
 	mov	[MEM.END+4],eax		;calculate end
-
-
 	mov	esp,eax			;put stack there
 	lea	ebp,[esp-1024]		;datastack
-	lea	edx,[esp-1024-4096]	;tib
+	lea	edx,[ebp-4096]		;tib
 	mov	[TIB+4],edx		
-mov	[PARSE.PTR+4],edx 	;current parse ptr ;
-	mov	byte[edx],0		;will force reloa
-
-	;;  	call	_ws
-	;;  	call	_parse	      
-	;; 
-				;	call	_FNV1a
-	;;  	mov 	ebx,16		;
-	;;  	call	_number
-	;; 	call	_search
-;	mov	ebx,[LAST+4]	
 				;	mov	ebx,[ebx-4] ;hash
 	DSTACK
 	push	1
 	push	2
 	push	3
-	mov	ebx,4
 	RSTACK
-	;; call	_ws		;
- 	;; call	_parse		;
+	mov	ebx,4
 	
 	mov	esi,main+4	;start
 	NEXT			
-
 
 _prompt:
 	DSTACK
@@ -64,13 +54,13 @@ _prompt:
 	push	_promptstr
 	push	5
 	RSTACK
-	mov	ebx,1 		;length
+	mov	ebx,1 		;stout
 	call	_oswrite
 	DSTACK
 	pop	ebx
 	RSTACK
 	ret
-
+_promptstr:	db 10,"OK> "
 ;;; buf,cnt,handle
 _osread:
 	mov	eax,3		;READ
@@ -89,7 +79,15 @@ _oswrite:
 	pop	esi
 	ret
 
+;;; mode,flags,path
+_osopen:	
+	mov	eax,5		;sys_open
+	jmp	_oswrite.1
 	
+
+_osexit:	
+	mov	eax,1
+	int 	0x80
 
 	
 	;; On entry: ebx = base
@@ -145,7 +143,6 @@ _is_ws: cmp	al,' '			;space
 	cmp	al,$D			;CR
 .x:	ret
 
-_promptstr:	db " OK> "
 _ws:	push	esi
 	mov	esi,[PARSE.PTR+4]
 	jmp	.loop
@@ -174,6 +171,23 @@ _ws:	push	esi
 	mov	[PARSE.PTR+4],esi
 	pop	esi
 	ret
+;;;----------------------------------------------------------------------------
+;;; _search for a hash, from LATEST to first.  Return 0 or entry.
+;;; 
+_search: 			;(hash--0/zr or --entry/nz)
+	mov	eax,[LATEST+4]
+	xchg	eax,ebx				;ebx = entry;  eax = hash
+	xor	edx,edx				;edx = skipback size
+.loop:	sub	ebx,edx
+	cmp	[ebx-4],eax
+	je	.done				;found
+	movzx	edx,word[ebx-6]			;link (16-bit amount to skip back);
+	test	edx,edx				;link of 0 means end
+	jne	.loop
+	xor	ebx,ebx
+.done:	test	ebx,ebx				;0/zr = fail
+	ret
+
 	
 ;;; ----------------------------------------------------------------------------
 ;;; _parse
@@ -203,28 +217,27 @@ _parse:
 .x:	mov	[PARSE.PTR+4],esi  		;update parse position
 	pop	esi
 	ret
-
-	
-
-
-inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
-.1:
-;; in parsing mode: esi=src
-
-;;; 
+;;; ****************************************************************************
 ;;; ----- DO NOT PUT HEADS ABOVE HERE
-HEAD PARSE.RESET,$+4
-	mov	edx,[TIB+4]
-	mov	[PARSE.PTR+4],edx ;reset parse ptr
-	mov	byte[edx],0
-	NEXT
-
+HEAD osexit,$+4
+	jmp	_osexit
 HEAD oswrite,$+4
 	call	_oswrite
 	NEXT
 HEAD osread,$+4
 	call	_osread
 	NEXT
+HEAD osopen,$+4
+	call	_osopen
+	NEXT
+	
+HEAD PARSE.RESET,$+4
+	mov	edx,[TIB+4]
+	mov	[PARSE.PTR+4],edx ;reset parse ptr
+	mov	byte[edx],0
+	NEXT
+
+
 
 HEAD emit,docol
 	dd 	XDSP		;push char, load pointer
@@ -238,7 +251,6 @@ HEAD type,docol
 	dd	lit,1		;stdout
 	dd	oswrite
 	dd	drop,return
-
 
 ;; HEAD emit,$+4
 ;; 	pusha
@@ -304,30 +316,24 @@ HEADN XHASH,"HASH",$+4
 	call	_FNV1a
 	pop	esi
 	NEXT
-;;;----------------------------------------------------------------------------
-;;; _search for a hash, from LATEST to first.  Return 0 or entry.
-;;; 
-_search: 			;(hash--0/zr or --entry/nz)
-	mov	eax,[LATEST+4]
-	xchg	eax,ebx				;ebx = entry;  eax = hash
-	xor	edx,edx				;edx = skipback size
-.loop:	sub	ebx,edx
-	cmp	[ebx-4],eax
-	je	.done				;found
-	movzx	edx,word[ebx-6]			;link (16-bit amount to skip back);
-	test	edx,edx				;link of 0 means end
-	jne	.loop
-	xor	ebx,ebx
-.done:	test	ebx,ebx				;0/zr = fail
-	ret
-
 ; 
 
 HEAD parse,$+4
 	call	_parse
 	NEXT
 
-;; ;;; HEAD strlen,$+4 		; (str--len)
+HEAD strlen,$+4 		; (str--str,len)
+	DSTACK
+	push	ebx
+	RSTACK
+ 	mov	edi,ebx		;starting from string start
+ 	mov	ecx,-1		;infinite count
+  	xor	eax,eax		;seek 0
+ 	repne scasb
+  	neg	ecx
+  	lea	ebx,[ecx-3]		;negation, starting at -1, 0-term
+  	NEXT
+	
 ;; _strlen:
 ;; 	mov	edi,ebx
 ;; 	mov	ecx,-1
@@ -365,7 +371,10 @@ HEAD HEXTAB,dovar
 	
 HEAD LATEST,dovar
 	dd	FINALHEAD
-	
+HEAD HANDLE.IN,dovar
+	dd	0
+HEAD HANDLE.OUT,dovar
+	dd	1	
 HEAD MEM.START,dovar
 	dd	0
 HEAD RUNPTR,dovar
@@ -380,13 +389,7 @@ HEAD TIB,dovar
 	dd	0	
 HEAD PARSE.PTR,dovar
 	dd	0	
-HEAD STATE,dovar  		;1 means
-	dd	0	
 
-HEAD exit,$+4
-	mov	eax,1
-	xor	ebx,ebx
-	int 	0x80
 
 HEAD cr,docol
 	dd	lit
@@ -395,11 +398,14 @@ HEAD cr,docol
 	dd	return
 
 HEAD space,docol
-	dd	lit
-	dd	' '
-	dd	emit
-	dd  	return
-
+	dd	lit,$20,emit,return
+HEAD spaces,docol
+	dd	xdup,zbranch,.done
+.again:	dd	space
+	dd	minus1
+	dd	xdup,nzbranch,.again
+.done:	dd	drop,return	;
+	
 HEAD hello,docol,1
 	dd	litstring
 	db	.strend-$-1,"nForth 0.0.1, Copyright (C) 2022 StackSmith",10
@@ -415,8 +421,9 @@ HEAD main,docol
 	dd	zbranch,.noerr
 
 .err:	dd	RUNPTR,fetch,HERE,xstore ;abandon
-	dd	sys
-	dd	lit,$DEADFEED,hexd,cr
+	dd	TIB,fetch,strlen,type,cr ;print the error line
+	dd	PARSE.PTR,fetch,TIB,fetch,minus
+ 	dd	spaces,lit,'^',emit,cr ;
 	dd	branch, .in
 
 .noerr:
@@ -742,6 +749,10 @@ HEADN equal,"=",$+4
 	sub	ebx,1		;-1, C          ?, NC
 	sbb	ebx,ebx		; -1 		0
 	NEXT
+
+HEADN minus1,"-1",$+4
+	dec	ebx
+	NEXT
 	
 ; -------------------
 ; Peek and Poke
@@ -782,6 +793,12 @@ HEADN zbranch,"0branch",$+4
 	lodsd			;eax = address to maybe jump to
 	test	ebx,ebx		;zr?
 	cmovz	esi,eax
+@@:	jmp	_popret
+
+HEADN nzbranch,"nzbranch",$+4
+	lodsd			;eax = address to maybe jump to
+	test	ebx,ebx		;zr?
+	cmovnz	esi,eax
 @@:	jmp	_popret
 
 ; branch - ( -- ) unconditional jump

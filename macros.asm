@@ -53,7 +53,6 @@ MACRO NEXT {
 ; -4 4	Hash field (name hash)
 ; -0 4	Code field
 ; ...
-LASTHEAD = PARSE.RESET
 IMMEDIATE equ 1	
 MACRO HEAD name,type, immediate=0 {
 align 4	
