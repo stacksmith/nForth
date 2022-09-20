@@ -376,7 +376,8 @@ HEAD TIB,dovar
 	dd	0	
 HEAD PARSE.PTR,dovar
 	dd	0	
-
+HEAD FIXUP.IF,dovar
+	dd	0
 
 HEAD cr,docol
 	dd	lit
@@ -414,9 +415,10 @@ HEAD main,docol
  	dd	spaces,lit,'^',emit,cr ;
 	dd	branch, .in
 
-.noerr:
-	dd	drop,INTERPRET
- 	dd	branch, .noerr
+
+.noerr:	dd	drop
+.loop:	dd	INTERPRET
+ 	dd	branch, .loop
 
 
 
@@ -485,16 +487,6 @@ HEAD decibranz,$+4
 	add	esp,4		;drop 0 count
 	add	esi,4		;skip loop target
 	NEXT
-;;; --------------------------------------------------------------------
-;;; CONTROL STRUCTURES
-;;; compile: <push>|... <timesp><loopstart>
-HEADN xtimes,"times",docol,1 	;(n--   n times (...)
-	dd	lit,xpush,comma		;compile <push>.  During compile,
-	dd	HERE,fetch,xpush 	;save target address on RSP
-	dd	ws,COMPILE.ONE		;compile expression
-	dd	lit,decibranz,comma	;complile <decibranz>
-	dd	xpop,comma		;compile target
-	dd	return
 	
 HEADN hexd,".",$+4
 	mov	ecx,8
@@ -846,6 +838,38 @@ HEADN return,";",$+4
 	pop	esi
 	NEXT
 
+;;; --------------------------------------------------------------------
+;;; CONTROL STRUCTURES
+;;; compile: <push>|... <timesp><loopstart>
+HEADN xtimes,"times",docol,1 	;(n--   n times (...)
+	dd	lit,xpush,comma		;compile <push>.  During compile,
+	dd	HERE,fetch,xpush 	;save target address on RSP
+	dd	ws,COMPILE.ONE		;compile expression
+	dd	lit,decibranz,comma	;complile <decibranz>
+	dd	xpop,comma		;compile target
+	dd	return
+
+
+
+
+HEADN xif,"if",docol,1
+;;;  	dd	FIXUP.IF,fetch,xpush 	;reentrant: push old IF
+	dd	lit,zbranch,comma 	;compile <zbranch>
+ 	dd	HERE,fetch,FIXUP.IF,xstore ;this is the fixup position
+	dd	zero,comma
+	dd	lit,hthanx,COMPILE.UNTIL   ;compile to thanx
+ 	dd	HERE,fetch,FIXUP.IF,fetch,xstore ;fixup to here, past thanx
+;;;  	dd	xpop,FIXUP.IF,xstore ;restore for reentrant if
+	dd	return
+
+HEADN xelse,"else",docol,1
+	dd	FIXUP.IF,fetch,zbranch,.err
+	dd	lit,branch,comma ;complie <branch> over else clause
+	dd	HERE,fetch,zero,comma	 ;keep next fixup position
+	dd	HERE,fetch,FIXUP.IF,fetch,xstore ;fixup if's target
+	dd	FIXUP.IF,xstore		   ;and save else's fixup
+	dd	return
+.err:	dd	lit,$99,ERXIT
 	
 FINALHEAD = LASTHEAD
 align 4
