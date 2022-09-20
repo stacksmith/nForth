@@ -13,7 +13,7 @@ entry start
 segment readable executable writeable
 
 hCBRACE = $D80C1648
-
+hthanx  = $07596E46	
 
 inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
 .1:
@@ -586,7 +586,7 @@ HEAD COMPILE.UNTIL,docol	;delim
 .in:	dd	ws
 	dd	xdup,XHASH,equal ;is current hash = delim?
 	dd	zbranch,.ne
-	dd	drop,parse,drop,drop	;delimiter skipped
+	dd	drop,skipword	;delimiter skipped
 	dd	return
 
 HEADN OBRACE,"[",docol,1       	;immediate!
@@ -846,8 +846,6 @@ HEADN return,";",$+4
 	pop	esi
 	NEXT
 
-HEADN CBRACE,"]",$+4
-	NEXT
 	
 FINALHEAD = LASTHEAD
 align 4
