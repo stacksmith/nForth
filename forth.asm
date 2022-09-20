@@ -234,7 +234,7 @@ HEAD osopen,$+4
 	call	_osopen
 	NEXT
 	
-HEAD PARSE.RESET,$+4
+HEADN parsereset,"\",$+4 		;"
 	mov	edx,[TIB+4]
 	mov	[PARSE.PTR+4],edx ;reset parse ptr
 	mov	byte[edx],0
@@ -407,7 +407,7 @@ align 4
 	
 HEAD main,docol
 	dd	hello
-.in:	dd	PARSE.RESET
+.in:	dd	parsereset
 	dd	ERR.CATCH
 	dd	xdup,zbranch,.noerr
 
@@ -515,6 +515,8 @@ HEAD hexw,$+4
 	shl	ebx,16
 	mov	ecx,4
 	jmp	hexloop
+
+
 ;;; ------------------------------------------------------------------------------
 ;;; ERROR HANDLING
 
