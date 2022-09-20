@@ -156,8 +156,10 @@ _ws:	push	esi
 	push	esi		;buffer
 	push	1024		;cnt
 	RSTACK
-	xor	ebx,ebx		;handle
+	mov	ebx,[HANDLE.IN+4]
 	call	_osread
+	test	ebx,ebx
+	js	.readerr
 	mov	byte[esi+ebx],0		;null-term
 	DSTACK
 	pop	ebx
@@ -171,6 +173,7 @@ _ws:	push	esi
 	mov	[PARSE.PTR+4],esi
 	pop	esi
 	ret
+.readerr:	
 ;;;----------------------------------------------------------------------------
 ;;; _search for a hash, from LATEST to first.  Return 0 or entry.
 ;;; 
@@ -395,8 +398,8 @@ HEAD spaces,docol
 .done:	dd	drop,return	;
 	
 HEAD hello,docol,1
-	dd	litstring
-	db	.strend-$-1,"nForth 0.0.1, Copyright (C) 2022 StackSmith",10
+	dd	_strlit
+	mstring <"nForth 0.0.1, Copyright (C) 2022 StackSmith",10>
 .strend:
 align 4
 	dd	type
@@ -414,7 +417,6 @@ HEAD main,docol
 	dd	PARSE.PTR,fetch,TIB,fetch,minus
  	dd	spaces,lit,'^',emit,cr ;
 	dd	branch, .in
-
 
 .noerr:	dd	drop
 .loop:	dd	INTERPRET
@@ -467,8 +469,9 @@ HEADN XRSP,"RSP",$+4
 	NEXT
 	
 HEAD sys,docol
-	dd 	litstring
+	dd 	_strlit
 	mstring <"DSP",9," RSP",9,"  DIC",9,"   SRC",$A>
+	
 	dd	type
 	dd	XDSP,hexd,space,XRSP,hexd,space
 	dd	HERE,fetch,hexd,space
@@ -659,18 +662,7 @@ HEADN one,"one",$+4
 	RSTACK
 	mov	ebx,1
 	NEXT
-
-HEAD litstring,$+4
-	DSTACK
-	lodsb			;load string size (byte)
-	push	ebx
-	push	esi		;
-	RSTACK
-	movzx	ebx,al		;TOS = cnt
- 	lea	esi,[esi+ebx+3]	;bump IP, aligning
- 	and	esi,$FFFFFFFC ;
-	NEXT
-
+	dd	return
 ; rot - ( x y z -- y z x )
 HEAD rot,$+4
 	DSTACK
@@ -837,6 +829,60 @@ HEAD dump,docol
 HEADN return,";",$+4
 	pop	esi
 	NEXT
+;;; ============================================================================
+;;; Strings (short) are stored as:
+;;; <_strlit><bytesize><string...>..aligned
+;;; 
+ANON _strlit,$+4
+	DSTACK
+	lodsb			;load string size (byte)
+	push	ebx
+	push	esi		;
+	RSTACK
+	movzx	ebx,al		;TOS = cnt
+ 	lea	esi,[esi+ebx+3]	;bump IP, aligning
+ 	and	esi,$FFFFFFFC ;
+	NEXT
+;;; primitive to copy string from source into dictionary, preceded by its byte
+;;; size.  Line boundary may not be crossed!
+ANON _getstr,$+4
+	push	esi
+	mov	esi,[PARSE.PTR+4]
+	mov	edi,[HERE+4]
+	mov	edx,edi		;edx points at count byte
+	xor	ecx,ecx
+	lodsb			;skip past space following "
+.loop:  inc	ecx
+	stosb
+	lodsb
+	test	al,al
+	je	.err
+	cmp	al,'"'		;"
+	jne	.loop
+	dec	ecx             ;-1 for the byte count itself.
+	mov	[edx],cl	;byte count, update
+	add	edi,3
+	and	edi,$FFFFFFFC	;align
+	mov	[HERE+4],edi
+	mov	[PARSE.PTR+4],esi ;just past "
+	pop	esi
+	NEXT
+.err:	DSTACK
+	push	ebx
+	RSTACK
+	mov	ebx,-11
+	jmp	ERXIT+4
+;;; " string"  At compile time, compile the string that follows.
+;;; at runtime, (--string,size) 
+HEADN stringlit,'"',docol,1 		;"
+	dd	lit,_strlit,comma ; compile <_strlit>
+	dd	_getstr		  ; copy string 
+	dd	return
+;;; ." msg" At compile time, compile string followed by <type>
+;;; At runtime, print the message.
+HEADN prstringlit,'."',docol,1 	;"
+	dd	stringlit
+	dd	lit,type,comma
 
 ;;; --------------------------------------------------------------------
 ;;; CONTROL STRUCTURES
@@ -853,13 +899,13 @@ HEADN xtimes,"times",docol,1 	;(n--   n times (...)
 
 
 HEADN xif,"if",docol,1
-;;;  	dd	FIXUP.IF,fetch,xpush 	;reentrant: push old IF
+  	dd	FIXUP.IF,fetch,xpush 	;reentrant: push old IF
 	dd	lit,zbranch,comma 	;compile <zbranch>
  	dd	HERE,fetch,FIXUP.IF,xstore ;this is the fixup position
 	dd	zero,comma
 	dd	lit,hthanx,COMPILE.UNTIL   ;compile to thanx
  	dd	HERE,fetch,FIXUP.IF,fetch,xstore ;fixup to here, past thanx
-;;;  	dd	xpop,FIXUP.IF,xstore ;restore for reentrant if
+  	dd	xpop,FIXUP.IF,xstore ;restore for reentrant if
 	dd	return
 
 HEADN xelse,"else",docol,1
