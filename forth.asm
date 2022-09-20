@@ -129,9 +129,9 @@ _number:
 	ret
 	
 .err:	DSTACK
-	pop	ebx
+ 	pop	ebx		;get rid of base
 	RSTACK
-	mov	ebx,-1
+	mov	ebx,-10
 	jmp	ERXIT+4
 	
 _is_ws: cmp	al,' '			;space
@@ -238,31 +238,18 @@ HEAD PARSE.RESET,$+4
 	NEXT
 
 
-
 HEAD emit,docol
 	dd 	XDSP		;push char, load pointer
-	dd	lit,1		;length
+	dd	one		;length
 	dd	xdup		;stdout
 	dd	oswrite,drop,drop
 	dd	return
 
 ;;; buf,cnt
 HEAD type,docol
-	dd	lit,1		;stdout
+	dd	one		;stdout
 	dd	oswrite
 	dd	drop,return
-
-;; HEAD emit,$+4
-;; 	pusha
-;; 	push	ebx		;char is at [esp]
-;; 	mov	eax,4
-;; 	mov	ebx,1		;stdout
-;; 	mov	ecx,esp		;char address
-;; 	mov	edx,ebx		;length 1
-;; 	int	0x80
-;; 	pop	ebx
-;; 	popa
-;; 	jmp	_popret
 
 HEAD ws,$+4
 	call	_ws
@@ -418,16 +405,17 @@ HEAD main,docol
 	dd	hello
 .in:	dd	PARSE.RESET
 	dd	ERR.CATCH
-	dd	zbranch,.noerr
+	dd	xdup,zbranch,.noerr
 
-.err:	dd	RUNPTR,fetch,HERE,xstore ;abandon
+.err:	dd 	drop			 ;for now ignore error number
+	dd	RUNPTR,fetch,HERE,xstore ;abandon
 	dd	TIB,fetch,strlen,type,cr ;print the error line
 	dd	PARSE.PTR,fetch,TIB,fetch,minus
  	dd	spaces,lit,'^',emit,cr ;
 	dd	branch, .in
 
 .noerr:
-	dd	INTERPRET
+	dd	drop,INTERPRET
  	dd	branch, .noerr
 
 
@@ -507,9 +495,6 @@ HEADN xtimes,"times",docol,1 	;(n--   n times (...)
 	dd	lit,decibranz,comma	;complile <decibranz>
 	dd	xpop,comma		;compile target
 	dd	return
-
-
-	
 	
 HEADN hexd,".",$+4
 	mov	ecx,8
@@ -540,9 +525,9 @@ HEAD hexw,$+4
 
 ;;; ERR.CATCH (--0/zr) or (--errno/nz)
 HEAD ERR.CATCH,$+4
-	xchg	ebp,esp
+	DSTACK
 	push	ebx
-	xchg	ebp,esp
+	RSTACK
 	push	esi			;save IP just after catch
 	push	dword[ERR.FRAME]	;save old frame
 	mov	[ERR.FRAME],esp	        ;establish new frame
@@ -669,7 +654,20 @@ HEAD lit,$+4
 	xchg	eax,ebx
 	NEXT
 ;;; string ( -- str cnt)
-	
+
+HEADN zero,"zero",$+4
+	DSTACK
+	push	ebx
+	RSTACK
+	xor	ebx,ebx
+	NEXT
+HEADN one,"one",$+4
+	DSTACK
+	push	ebx
+	RSTACK
+	mov	ebx,1
+	NEXT
+
 HEAD litstring,$+4
 	DSTACK
 	lodsb			;load string size (byte)
@@ -683,14 +681,19 @@ HEAD litstring,$+4
 
 ; rot - ( x y z -- y z x )
 HEAD rot,$+4
-	xchg	ebp,esp
+	DSTACK
 	pop	edx
 	pop	eax
 	push	edx
-	push	ebx
+	jmp	swap.1
+; # swap - ( x y -- y x ) exchange x and y
+HEAD swap,$+4
+	DSTACK
+	pop	eax
+.1:	push	ebx
+	RSTACK
 	xchg	eax,ebx
-	xchg	ebp,esp
-	NEXT	
+	NEXT
 ; drop - ( x -- ) remove x from the stack.
 HEAD drop,$+4
 _popret:
@@ -700,35 +703,28 @@ _popret:
 	NEXT
 ; dup - ( x -- x x ) add a copy of x to the stack
 HEADN xdup,"dup",$+4
-	xchg	ebp,esp
+	DSTACK
 	push	ebx
-	xchg	ebp,esp
+	RSTACK
 	NEXT
-; # swap - ( x y -- y x ) exchange x and y
-HEAD swap,$+4
-	xchg	ebp,esp
-	pop	eax
-	push	ebx
-	xchg	eax,ebx
-	xchg	ebp,esp
-	NEXT
+
 ; -------------------
 ; Maths / Logic
 ; -------------------
 
 ; + - ( x y -- z) calculate z=x+y then return z
 HEADN plus,"+",$+4
-	xchg	ebp,esp
+	DSTACK
 	pop	eax
-	xchg	ebp,esp
+	RSTACK
 	add	ebx,eax
 	NEXT
 
 ; + - ( x y -- z) calculate z=x-y then return z
 HEADN minus,"-",$+4
-	xchg	ebp,esp
+	DSTACK
 	pop	eax
-	xchg	ebp,esp
+	RSTACK
 	sub	eax,ebx
 	xchg	eax,ebx
 	NEXT
@@ -752,6 +748,9 @@ HEADN equal,"=",$+4
 
 HEADN minus1,"-1",$+4
 	dec	ebx
+	NEXT
+HEADN plus1,"+1",$+4
+	inc	ebx
 	NEXT
 	
 ; -------------------
@@ -833,15 +832,15 @@ HEADN xpop,"pop",$+4
 	NEXT
 	
 HEAD dumpbyte,docol
-	dd	xdup,fetch,hexb,space,lit,1,plus,return	
-HEAD dump1,docol		;addr
+	dd	xdup,fetch,hexb,space,plus1,return	
+HEAD dump16,docol		;addr
 	dd	xdup,hexd,space,space
 	dd	lit,16,xpush	;16 times
 @@:	dd	dumpbyte
 	dd	decibranz,@b
 	dd	cr,return
 HEAD dump,docol
-	dd	dump1,dump1,dump1,dump1,return
+	dd	dump16,dump16,dump16,dump16,return
 
 HEADN return,";",$+4
 	pop	esi
