@@ -10,7 +10,8 @@ entry start
 
 segment readable executable writeable
 
-hCBRACE = $D80C1648	
+hCBRACE = $D80C1648
+
 start:
 
  	;-----------------------------------------------------------------------
@@ -56,29 +57,26 @@ mov	[PARSE.PTR+4],edx 	;current parse ptr ;
 	mov	esi,main+4	;start
 	NEXT			
 
-inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
-.1:
-;; in parsing mode: esi=src
 
-_is_ws: cmp	al,' '			;space
-	je	.x
-	cmp	al,9			;tab
-	je	.x
-	cmp	al,$A			;LF
-	je	.x
-	cmp	al,$D			;CR
-.x:	ret
-;;; 
-;;; ----- DO NOT PUT HEADS ABOVE HERE
-HEAD PARSE.RESET,$+4
-	mov	edx,[TIB+4]
-	mov	[PARSE.PTR+4],edx ;reset parse ptr
-	mov	byte[edx],0
-	NEXT
-
+_prompt:
+	DSTACK
+	push	ebx
+	push	_promptstr
+	push	5
+	RSTACK
+	mov	ebx,1 		;length
+	call	_oswrite
+	DSTACK
+	pop	ebx
+	RSTACK
+	ret
 
 ;;; buf,cnt,handle
-HEAD oswrite,$+4
+_osread:
+	mov	eax,3		;READ
+	jmp	_oswrite.1
+
+_oswrite:	
 	mov	eax,4		;WRITE
 .1:	push	esi
 	DSTACK
@@ -89,96 +87,12 @@ HEAD oswrite,$+4
 	mov	ebx,eax		;result
 
 	pop	esi
-	NEXT
-;;;  buf,cnt,handle
-HEAD osread,$+4
-	mov	eax,3		;READ
-	jmp	oswrite.1
-
-HEAD emit,docol
-	dd 	XDSP		;push char, load pointer
-	dd	lit,1		;length
-	dd	xdup		;stdout
-	dd	oswrite,drop,drop
-	dd	return
-	
-
-;; HEAD emit,$+4
-;; 	pusha
-;; 	push	ebx		;char is at [esp]
-;; 	mov	eax,4
-;; 	mov	ebx,1		;stdout
-;; 	mov	ecx,esp		;char address
-;; 	mov	edx,ebx		;length 1
-;; 	int	0x80
-;; 	pop	ebx
-;; 	popa
-;; 	jmp	_popret
-
-
-_prompt:
-	DSTACK
-	push	ebx
-	push	_promptstr
-	RSTACK
-	mov	ebx,5
-	jmp	_type
-	
-_promptstr:	db " OK> "
-_ws:	push	esi
-	mov	esi,[PARSE.PTR+4]
-	jmp	.loop
-.reload:
-	call	_prompt
-	
-	push	ebx
-	xor	ebx,ebx			;stdin
-	mov	ecx,[TIB+4]		;address
-	mov	esi,ecx
-	mov	[PARSE.PTR+4],ecx
-	mov	edx,1024		;tib size...
-	mov	eax,3			;read
-	int	$80
-	mov	byte[ecx+eax],0		;null-term
-	mov 	ebx,eax
-	pop	ebx
- 
-.loop:	lodsb      			;al = char
-	test	al,al			;EOL? 
-	jz	.reload
-.ws:	call	_is_ws
-	je	.loop	
-	dec	esi			;point at the first non-ws cjar
-	mov	[PARSE.PTR+4],esi
-	pop	esi
 	ret
 
-HEAD ws,$+4
-	call	_ws
-	NEXT
 	
-HEAD skipword,$+4
-	push	esi
-	mov	esi,[PARSE.PTR+4]
-@@:	lodsb
-	call	_is_ws
-	jne	@b
-	dec	esi
-	mov	[PARSE.PTR+4],esi
-	pop	esi
-	NEXT
-	
-; eax=scan,mulresult
-; 
-; ecx=temp,cnt
-; edx
-; esi=string
-; edi=accum
-; ebp=dsp
-; [ebp+4]=base
-; [ebp]=accum
 
-;; On entry: ebx = base
+	
+	;; On entry: ebx = base
 _number:
 	;; 	push	esi
 	;; 	mov	esi,[PARSE.PTR+4]
@@ -222,6 +136,148 @@ _number:
 	mov	ebx,-1
 	jmp	ERXIT+4
 	
+_is_ws: cmp	al,' '			;space
+	je	.x
+	cmp	al,9			;tab
+	je	.x
+	cmp	al,$A			;LF
+	je	.x
+	cmp	al,$D			;CR
+.x:	ret
+
+_promptstr:	db " OK> "
+_ws:	push	esi
+	mov	esi,[PARSE.PTR+4]
+	jmp	.loop
+.reload:
+	call	_prompt
+
+	mov	esi,[TIB+4]	;buffer
+	mov	[PARSE.PTR+4],ecx ;reset parse pointer
+	DSTACK
+	push	ebx
+	push	esi		;buffer
+	push	1024		;cnt
+	RSTACK
+	xor	ebx,ebx		;handle
+	call	_osread
+	mov	byte[esi+ebx],0		;null-term
+	DSTACK
+	pop	ebx
+	RSTACK
+.loop:	lodsb      			;al = char
+	test	al,al			;EOL? 
+	jz	.reload
+.ws:	call	_is_ws
+	je	.loop	
+	dec	esi			;point at the first non-ws cjar
+	mov	[PARSE.PTR+4],esi
+	pop	esi
+	ret
+	
+;;; ----------------------------------------------------------------------------
+;;; _parse
+;;; Parse a word in TIB at PARSE.PTR, as a word, and then as a number.  
+;; word:   -- word,1
+;; number: -- num,0
+;; otherwise, num will force an error.
+_parse:
+	push	esi
+	mov	esi,[PARSE.PTR+4]
+	push	esi                             ;keep around in case of search failure
+	call	_FNV1a				;hash it
+	call	_search				;try to find it (NZ=found)
+	jnz	.found
+	pop	esi		;restore parse position
+	mov	ebx,16		;try to find as hex
+	call	_number		;number
+	DSTACK
+	push	ebx
+	RSTACK
+	xor	ebx,ebx
+	jmp	.x
+.found: pop	eax				;drop ptr to name
+	DSTACK
+	push	ebx		;--entry,entry  ;anything nz will do
+	RSTACK
+.x:	mov	[PARSE.PTR+4],esi  		;update parse position
+	pop	esi
+	ret
+
+	
+
+
+inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
+.1:
+;; in parsing mode: esi=src
+
+;;; 
+;;; ----- DO NOT PUT HEADS ABOVE HERE
+HEAD PARSE.RESET,$+4
+	mov	edx,[TIB+4]
+	mov	[PARSE.PTR+4],edx ;reset parse ptr
+	mov	byte[edx],0
+	NEXT
+
+HEAD oswrite,$+4
+	call	_oswrite
+	NEXT
+HEAD osread,$+4
+	call	_osread
+	NEXT
+
+HEAD emit,docol
+	dd 	XDSP		;push char, load pointer
+	dd	lit,1		;length
+	dd	xdup		;stdout
+	dd	oswrite,drop,drop
+	dd	return
+
+;;; buf,cnt
+HEAD type,docol
+	dd	lit,1		;stdout
+	dd	oswrite
+	dd	drop,return
+
+
+;; HEAD emit,$+4
+;; 	pusha
+;; 	push	ebx		;char is at [esp]
+;; 	mov	eax,4
+;; 	mov	ebx,1		;stdout
+;; 	mov	ecx,esp		;char address
+;; 	mov	edx,ebx		;length 1
+;; 	int	0x80
+;; 	pop	ebx
+;; 	popa
+;; 	jmp	_popret
+
+HEAD ws,$+4
+	call	_ws
+	NEXT
+	
+HEAD skipword,$+4
+	push	esi
+	mov	esi,[PARSE.PTR+4]
+@@:	lodsb
+	call	_is_ws
+	jne	@b
+	dec	esi
+	mov	[PARSE.PTR+4],esi
+	pop	esi
+	NEXT
+	
+; eax=scan,mulresult
+; 
+; ecx=temp,cnt
+; edx
+; esi=string
+; edi=accum
+; ebp=dsp
+; [ebp+4]=base
+; [ebp]=accum
+
+
 	
 ;;; ----------------------------------------------------------------------------
 ;;; Hash a string at esi, advancing esi until WS.  Hash overwrites EBX.
@@ -266,34 +322,6 @@ _search: 			;(hash--0/zr or --entry/nz)
 	ret
 
 ; 
-;;; ----------------------------------------------------------------------------
-;;; _parse
-;;; Parse a word in TIB at PARSE.PTR, as a word, and then as a number.  
-;; word:   -- word,1
-;; number: -- num,0
-;; otherwise, num will force an error.
-_parse:
-	push	esi
-	mov	esi,[PARSE.PTR+4]
-	push	esi                             ;keep around in case of search failure
-	call	_FNV1a				;hash it
-	call	_search				;try to find it (NZ=found)
-	jnz	.found
-	pop	esi		;restore parse position
-	mov	ebx,16		;try to find as hex
-	call	_number		;number
-	DSTACK
-	push	ebx
-	RSTACK
-	xor	ebx,ebx
-	jmp	.x
-.found: pop	eax				;drop ptr to name
-	DSTACK
-	push	ebx		;--entry,entry  ;anything nz will do
-	RSTACK
-.x:	mov	[PARSE.PTR+4],esi  		;update parse position
-	pop	esi
-	ret
 
 HEAD parse,$+4
 	call	_parse
@@ -309,21 +337,12 @@ HEAD parse,$+4
 ;;  	lea	ebx,[ecx-3]		;negation, starting at -1, 0-term
 ;;  	ret
 ;;; HEAD type,$+4	       ;(c-addr,cnt--)
-_type: 
-	DSTACK
- 	mov	edx,ebx                 ;size
- 	mov	ebx,1			;stdout
-	pop	ecx			;buffer
- 	mov	eax,4			;write
- 	int	$80
-	pop	ebx
-	RSTACK
-	ret
-HEAD type,$+4
-	call	_type
-	NEXT
-;; readln:	
-;; 	xor	ebx,ebx			;stdin
+
+;; HEAD type,$+4
+;; 	call	_type
+;; 	NEXT
+;; ;; readln:	
+;; 	xor	ebx,ebx			;so
 ;; 	mov	ecx,[TIB+4]		;address
 ;; 	mov	edx,1024		;tib size...
 ;; 	mov	eax,3			;read
