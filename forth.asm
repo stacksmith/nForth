@@ -231,6 +231,9 @@ _parse:
 	pop	esi
 	ret
 ;;; ****************************************************************************
+;;; ****************************************************************************
+;;; ****************************************************************************
+;;; ****************************************************************************
 ;;; ----- DO NOT PUT HEADS ABOVE HERE
 HEAD osexit,$+4
 	jmp	_osexit
@@ -376,9 +379,35 @@ dovar:	xchg	esp,ebp
 	xchg	esp,ebp
 	lea	ebx,[eax+4]
 	NEXT
+;;; Numeric parsing, output
 HEAD HEXTAB,dovar
 	db "0123456789ABCDEF"
+;;; Express num in PRINT.BASE by stacking, LSB-first, all digits.
+;;; Return digit count in TOS.
+;;; num--...num,cnt
+HEAD output,$+4
+	xchg	eax,ebx		;number in eax
+	mov	ebx,[PRINT.BASE+4]
+	xor	ecx,ecx
+	DSTACK
 	
+.loop:	xor	edx,edx
+	div	ebx
+	push	edx		;push digit
+	inc	ecx		;count of digits pushed
+	test	eax,eax
+	jnz	.loop
+
+	RSTACK
+	mov	ebx,ecx		;digit count
+	NEXT
+
+HEADN dot,".",docol
+	dd	output,xpush
+@@:	dd	HEXTAB,plus,fetchc,emit
+	dd	decibranz,@b
+	dd	xpop,return
+
 HEAD LATEST,dovar
 	dd	FINALHEAD
 HEAD HANDLE.IN,dovar
@@ -395,7 +424,6 @@ HEAD MEM.END,dovar
 	dd	0
 HEAD MEM.ORIG,dovar
 	dd	0
-	
 HEAD ERR.FRAME,dovar
 	dd	0	
 HEAD TIB,dovar
@@ -404,7 +432,8 @@ HEAD PARSE.PTR,dovar
 	dd	0	
 HEAD FIXUP.IF,dovar
 	dd	0
-
+HEAD PRINT.BASE,dovar
+	dd	10
 HEAD cr,docol
 	dd	lit
 	dd	$A
@@ -518,7 +547,7 @@ HEAD decibranz,$+4
 	add	esi,4		;skip loop target
 	NEXT
 	
-HEADN hexd,".",$+4
+HEAD hexd,$+4
 	mov	ecx,8
 hexloop:
 	rol	ebx,4
@@ -759,12 +788,21 @@ HEADN equal,"=",$+4
 	sbb	ebx,ebx		; -1 		0
 	NEXT
 
-HEADN minus1,"-1",$+4
+HEADN minus1,"1-",$+4
 	dec	ebx
 	NEXT
-HEADN plus1,"+1",$+4
+HEADN plus1,"1+",$+4
 	inc	ebx
 	NEXT
+;;; a,b --- rem,res
+HEADN ummod,"UM/MOD",$+4
+	mov	eax,[ebp]	;dividing this
+	xor	edx,edx
+	div	ebx		;by tos
+	xchg	eax,ebx		;tos is result
+	mov	[ebp],edx	;remainder above
+	NEXT
+
 	
 ; -------------------
 ; Peek and Poke
