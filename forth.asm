@@ -2,7 +2,7 @@
 	
 ; fasm demonstration of writing simple ELF executable
 
-MEMSIZE = $100000
+MEMSIZE = $2000000  		;32MB
 LASTHEAD = osexit
 	
 include "macros.asm"
@@ -23,16 +23,15 @@ start:
  	;-----------------------------------------------------------------------
  	; First brk gets the top of allocated memory; second attempts to allot
  	; more memory.
- 	;
- 	mov	dword[MEM.START+4],start	; memory block start
+ 				;
+	mov	ebx,start
+ 	mov	dword[MEM.START+4],ebx	; memory block start
  	mov	dword[HERE+4],TOP	; memory top
- 	mov	eax,45                 		; brk
- 	mov	ebx,0				; 0 is an illegal memory top
+ 	mov	eax,45                 	; brk
+ 	add	ebx,MEMSIZE		; want this much total
  	int	0x80			; eax = top of allocated memory
- 	lea	ebx,[eax+MEMSIZE]	; ask for this much
- 	mov	eax,45			;brk
- 	int	0x80
 	mov	[MEM.END+4],eax		;calculate end
+	and	eax,$FFFFF000		;page-align
 	mov	esp,eax			;put stack there
 	lea	ebp,[esp-1024]		;datastack
 	lea	edx,[ebp-4096]		;tib
@@ -393,7 +392,10 @@ HEAD RUNPTR,dovar
 HEAD HERE,dovar
 	dd	0	
 HEAD MEM.END,dovar
-	dd	0	
+	dd	0
+HEAD MEM.ORIG,dovar
+	dd	0
+	
 HEAD ERR.FRAME,dovar
 	dd	0	
 HEAD TIB,dovar
@@ -635,7 +637,7 @@ HEADN colon,":",docol,1
 ;;;   HERE @ RUNTPR !                \ do not run definition
 ;;;   ;
 	
-;;; In order to execute
+;;; Execute tokens from address in TOS, and return when done.
 HEAD CALLSTREAM,$+4
 	push	esi
 	mov	esi,ebx
@@ -949,9 +951,6 @@ HEADN xelse,"else",docol,1
 
 ;;;(name,namelen--)
 HEADN xload,"load",docol
-	
-
-	
  	dd	HANDLE.IN, fetch,xpush	  ; keep old input handle on stack
 	dd	drop,xpush,zero,zero,xpop ; --0,0,fname
 	dd  	osopen
