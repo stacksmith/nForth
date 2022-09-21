@@ -15,7 +15,7 @@ segment readable executable writeable
 hCBRACE = $D80C1648
 hthanx  = $07596E46	
 
-inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith",10
+inmsg:	db "nForth 0.0.1, Copyright (C) 2022 StackSmith"
 .1:
 
 start:
@@ -49,6 +49,8 @@ start:
 	NEXT			
 
 _prompt:
+	cmp	dword[HANDLE.IN+4],0	;only prompt for terminal input
+	jne	.x
 	DSTACK
 	push	ebx
 	push	_promptstr
@@ -59,7 +61,7 @@ _prompt:
 	DSTACK
 	pop	ebx
 	RSTACK
-	ret
+.x:	ret
 _promptstr:	db 10,"OK> "
 ;;; buf,cnt,handle
 _osread:
@@ -83,12 +85,13 @@ _oswrite:
 _osopen:	
 	mov	eax,5		;sys_open
 	jmp	_oswrite.1
-	
-
 _osexit:	
 	mov	eax,1
 	int 	0x80
-
+_osclose:
+	mov	eax,6
+	int	0x80
+	ret
 	
 	;; On entry: ebx = base
 _number:
@@ -150,20 +153,24 @@ _ws:	push	esi
 	call	_prompt
 
 	mov	esi,[TIB+4]	;buffer
-	mov	[PARSE.PTR+4],ecx ;reset parse pointer
-	DSTACK
+	mov	[PARSE.PTR+4],esi ;reset parse pointer
+.loop1:	DSTACK
 	push	ebx
 	push	esi		;buffer
-	push	1024		;cnt
+	push	1		;cnt
 	RSTACK
 	mov	ebx,[HANDLE.IN+4]
 	call	_osread
-	test	ebx,ebx
-	js	.readerr
-	mov	byte[esi+ebx],0		;null-term
+	cmp	ebx,0		;if read 0 or error
+	jle	.readerr
 	DSTACK
 	pop	ebx
 	RSTACK
+	lodsb
+	cmp	al,$a		;CR?
+	jne	.loop1
+	mov	byte[esi],0		;null-term
+	mov	esi,[TIB+4]
 .loop:	lodsb      			;al = char
 	test	al,al			;EOL? 
 	jz	.reload
@@ -173,7 +180,11 @@ _ws:	push	esi
 	mov	[PARSE.PTR+4],esi
 	pop	esi
 	ret
-.readerr:	
+;;; If we hit EOF, we will get a read error.
+.readerr: 
+	mov	ebx,$E0F
+	jmp	ERXIT+4
+
 ;;;----------------------------------------------------------------------------
 ;;; _search for a hash, from LATEST to first.  Return 0 or entry.
 ;;; 
@@ -230,8 +241,12 @@ HEAD oswrite,$+4
 HEAD osread,$+4
 	call	_osread
 	NEXT
+	;;  mode,flags,path
 HEAD osopen,$+4
 	call	_osopen
+	NEXT
+HEAD osclose,$+4
+	call	_osclose
 	NEXT
 	
 HEADN parsereset,"\",$+4 		;"
@@ -248,11 +263,17 @@ HEAD emit,docol
 	dd	oswrite,drop,drop
 	dd	return
 
+
+HEAD key,docol
+	dd	xdup,XDSP	;push nonsense,load pointer
+	dd	one		;length
+	dd	zero		;stdin
+	dd	osread,drop
+	dd	return
+
 ;;; buf,cnt
 HEAD type,docol
-	dd	one		;stdout
-	dd	oswrite
-	dd	drop,return
+	dd	one,oswrite,drop,return
 
 HEAD ws,$+4
 	call	_ws
@@ -321,7 +342,7 @@ HEAD strlen,$+4 		; (str--str,len)
   	xor	eax,eax		;seek 0
  	repne scasb
   	neg	ecx
-  	lea	ebx,[ecx-3]		;negation, starting at -1, 0-term
+  	lea	ebx,[ecx-2]		;negation, starting at -1, 0-term
   	NEXT
 	
 ;; _strlen:
@@ -411,15 +432,18 @@ HEAD main,docol
 	dd	ERR.CATCH
 	dd	xdup,zbranch,.noerr
 
-.err:	dd 	drop			 ;for now ignore error number
-	dd	RUNPTR,fetch,HERE,xstore ;abandon
-	dd	TIB,fetch,strlen,type,cr ;print the error line
+.err:	dd	xdup,lit,$E0F,minus,zbranch,.eof ;handle EOF
+	dd	TIB,fetch,strlen,type ;print the error line
 	dd	PARSE.PTR,fetch,TIB,fetch,minus
- 	dd	spaces,lit,'^',emit,cr ;
+ 	dd	spaces,lit,'^',emit;
+.eof:	dd 	drop			
+	dd      zero,HANDLE.IN,xstore
+	dd	RUNPTR,fetch,HERE,xstore ;abandon
 	dd	branch, .in
 
 .noerr:	dd	drop
-.loop:	dd	INTERPRET
+.loop:
+	dd	INTERPRET
  	dd	branch, .loop
 
 
@@ -470,11 +494,12 @@ HEADN XRSP,"RSP",$+4
 	
 HEAD sys,docol
 	dd 	_strlit
-	mstring <"DSP",9," RSP",9,"  DIC",9,"   SRC",$A>
+	mstring <"DSP",9," RSP",9,"  HERE",9,"   RUN",9,"    SRC">
 	
-	dd	type
+	dd	type,cr
 	dd	XDSP,hexd,space,XRSP,hexd,space
 	dd	HERE,fetch,hexd,space
+	dd	RUNPTR,fetch,hexd,space
 	dd	PARSE.PTR,fetch,hexd,cr
 	dd	_sysp
 	dd	hexd,space,hexd,space,hexd,cr
@@ -836,13 +861,13 @@ HEADN return,";",$+4
 ;;; <_strlit><bytesize><string...>..aligned
 ;;; 
 ANON _strlit,$+4
-	DSTACK
 	lodsb			;load string size (byte)
+	DSTACK
 	push	ebx
 	push	esi		;
 	RSTACK
 	movzx	ebx,al		;TOS = cnt
- 	lea	esi,[esi+ebx+3]	;bump IP, aligning
+ 	lea	esi,[esi+ebx+3+1]	;bump IP, aligning. +1 for the 0-term
  	and	esi,$FFFFFFFC ;
 	NEXT
 ;;; primitive to copy string from source into dictionary, preceded by its byte
@@ -861,6 +886,8 @@ ANON _getstr,$+4
 	je	.err
 	cmp	al,'"'		;"
 	jne	.loop
+	xor	eax,eax
+	stosb			;null-term
 	dec	ecx             ;-1 for the byte count itself.
 	mov	[edx],cl	;byte count, update
 	add	edi,3
@@ -869,22 +896,25 @@ ANON _getstr,$+4
 	mov	[PARSE.PTR+4],esi ;just past "
 	pop	esi
 	NEXT
-.err:	DSTACK
+.err:	
+	DSTACK
 	push	ebx
 	RSTACK
 	mov	ebx,-11
 	jmp	ERXIT+4
+
 ;;; " string"  At compile time, compile the string that follows.
 ;;; at runtime, (--string,size) 
 HEADN stringlit,'"',docol,1 		;"
 	dd	lit,_strlit,comma ; compile <_strlit>
-	dd	_getstr		  ; copy string 
+	dd	_getstr		  ; copy string
 	dd	return
 ;;; ." msg" At compile time, compile string followed by <type>
 ;;; At runtime, print the message.
 HEADN prstringlit,'."',docol,1 	;"
 	dd	stringlit
 	dd	lit,type,comma
+	dd	return
 
 ;;; --------------------------------------------------------------------
 ;;; CONTROL STRUCTURES
@@ -896,8 +926,6 @@ HEADN xtimes,"times",docol,1 	;(n--   n times (...)
 	dd	lit,decibranz,comma	;complile <decibranz>
 	dd	xpop,comma		;compile target
 	dd	return
-
-
 
 
 HEADN xif,"if",docol,1
@@ -918,6 +946,35 @@ HEADN xelse,"else",docol,1
 	dd	FIXUP.IF,xstore		   ;and save else's fixup
 	dd	return
 .err:	dd	lit,$99,ERXIT
+
+;;;(name,namelen--)
+HEADN xload,"load",docol
+	
+
+	
+ 	dd	HANDLE.IN, fetch,xpush	  ; keep old input handle on stack
+	dd	drop,xpush,zero,zero,xpop ; --0,0,fname
+	dd  	osopen
+	dd	HANDLE.IN,xstore
+	dd	ERR.CATCH,xdup,nzbranch,.err
+	
+	dd	drop
+	dd	RUNPTR,fetch,HERE,xstore ;abandon current execution
+	dd	parsereset		 ;will force a line load
+
+.loop:	dd	INTERPRET,branch,.loop ; no way out except EOF
+
+.err:	dd	drop		;error number
+	dd	HANDLE.IN,fetch,osclose,drop
+	dd	xpop,HANDLE.IN,xstore
+
+	dd	parsereset
+;;; We were invoked with a [ " foo.f" load ], and must not return there, as it was
+;;; erased prior to load!  Instead, return to the level above, INTERPRET or another
+;;; layer of load when nested...
+	dd 	xpop,drop
+	dd	return
+
 	
 FINALHEAD = LASTHEAD
 align 4

@@ -5,7 +5,7 @@ UNAME := $(shell uname)
 all: forth
 
 clean:
-	rm -f *.lst *~
+	rm -f *.lst *~ *#
 
 forth:	macros.asm forth.asm
 	fasm forth.asm -s forth.sym
